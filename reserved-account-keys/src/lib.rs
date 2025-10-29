@@ -160,6 +160,10 @@ lazy_static! {
         ReservedAccount::new_pending(zk_elgamal_proof_program::id(), feature_set::add_new_reserved_account_keys::id()),
         ReservedAccount::new_pending(zk_token_proof_program::id(), feature_set::add_new_reserved_account_keys::id()),
 
+        // Sonic:
+        ReservedAccount::new_pending(solana_sdk_ids::sonic::account_migrater::program::id(), feature_set::add_new_reserved_account_keys::id()),
+        ReservedAccount::new_pending(solana_sdk_ids::sonic::fee_settlement::program::id(), feature_set::add_new_reserved_account_keys::id()),
+
         // sysvars
         ReservedAccount::new_active(sysvar::clock::id()),
         ReservedAccount::new_pending(sysvar::epoch_rewards::id(), feature_set::add_new_reserved_account_keys::id()),

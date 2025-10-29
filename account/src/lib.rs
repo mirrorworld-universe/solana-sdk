@@ -144,6 +144,9 @@ pub struct AccountSharedData {
     executable: bool,
     /// the epoch at which this account will next owe rent
     rent_epoch: Epoch,
+    /// Sonic: whether this account is a native loader account
+    #[cfg_attr(feature = "serde", serde(skip, default))]
+    pub remote: bool,
 }
 
 /// Compares two ReadableAccounts
@@ -178,6 +181,8 @@ impl From<Account> for AccountSharedData {
             owner: other.owner,
             executable: other.executable,
             rent_epoch: other.rent_epoch,
+            // Sonic:
+            remote: false,
         }
     }
 }
@@ -323,6 +328,8 @@ impl WritableAccount for AccountSharedData {
             owner,
             executable,
             rent_epoch,
+            // Sonic:
+            remote: false,
         }
     }
 }
@@ -373,6 +380,8 @@ impl ReadableAccount for Ref<'_, AccountSharedData> {
             owner: *self.owner(),
             executable: self.executable(),
             rent_epoch: self.rent_epoch(),
+            // Sonic:
+            remote: self.remote,
         }
     }
 }

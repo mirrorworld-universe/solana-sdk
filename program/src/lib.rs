@@ -513,6 +513,9 @@ pub mod system_instruction;
 pub mod system_program;
 pub mod sysvar;
 pub mod wasm;
+// Sonic:
+pub mod sonic_account_migrater;
+pub mod sonic_fee_settlement;
 
 #[deprecated(since = "2.2.0", note = "Use `solana-big-mod-exp` crate instead")]
 pub use solana_big_mod_exp as big_mod_exp;
@@ -625,6 +628,9 @@ pub mod sdk_ids {
                 stake::program::id(),
                 #[allow(deprecated)]
                 stake::config::id(),
+                // Sonic:
+                crate::sonic_account_migrater::program::id(),
+                crate::sonic_fee_settlement::program::id(),
             ];
             sdk_ids.extend(sysvar::ALL_IDS.iter());
             sdk_ids

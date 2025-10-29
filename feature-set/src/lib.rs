@@ -454,7 +454,7 @@ pub mod preserve_rent_epoch_for_rent_exempt_accounts {
 }
 
 pub mod enable_bpf_loader_extend_program_ix {
-    solana_pubkey::declare_id!("8Zs9W7D9MpSEtUWSQdGniZk2cNmV22y6FLJwCx53asme");
+    solana_pubkey::declare_id!("JC5GB7HH2BD5NuFfiWBV76XAnsvEpPz8LgPEvVb1tn8Q");
 }
 
 pub mod enable_early_verification_of_account_modifications {

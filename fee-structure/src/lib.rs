@@ -31,6 +31,8 @@ pub struct FeeStructure {
     pub lamports_per_write_lock: u64,
     /// Compute unit fee bins
     pub compute_fee_bins: Vec<FeeBin>,
+    /// Sonic: congestion multiplier
+    pub sonic_fee_multiplier: u64,
 }
 
 #[cfg_attr(
@@ -88,10 +90,21 @@ impl FeeStructure {
                 fee: sol_to_lamports(*sol),
             })
             .collect::<Vec<_>>();
+
+        //Sonic: get fee multiplier from environment variable
+        let mut sonic_fee_multiplier = 10_000;
+
+        if let Ok(env) = std::env::var("SONIC_FEE_MULTIPLIER") {
+            if let Ok(res) = env.parse() {
+                sonic_fee_multiplier = res;
+            }
+        }
+
         FeeStructure {
             lamports_per_signature: sol_to_lamports(sol_per_signature),
             lamports_per_write_lock: sol_to_lamports(sol_per_write_lock),
             compute_fee_bins,
+            sonic_fee_multiplier,
         }
     }
 
@@ -105,6 +118,9 @@ impl FeeStructure {
                     .map(|bin| bin.fee)
                     .unwrap_or_default(),
             )
+            // Sonic:
+            .saturating_mul(self.sonic_fee_multiplier)
+            / 10_000
     }
 
     pub fn calculate_memory_usage_cost(
@@ -115,6 +131,7 @@ impl FeeStructure {
             .saturating_add(ACCOUNT_DATA_COST_PAGE_SIZE.saturating_sub(1))
             .saturating_div(ACCOUNT_DATA_COST_PAGE_SIZE)
             .saturating_mul(heap_cost)
+            / 10_000
     }
 
     /// Calculate fee for `SanitizedMessage`
@@ -193,7 +210,10 @@ impl FeeStructure {
         FeeDetails {
             transaction_fee: signature_fee
                 .saturating_add(write_lock_fee)
-                .saturating_add(compute_fee),
+                .saturating_add(compute_fee)
+                // Sonic:
+                .saturating_mul(self.sonic_fee_multiplier)
+                / 10_000,
             prioritization_fee: budget_limits.prioritization_fee,
         }
     }

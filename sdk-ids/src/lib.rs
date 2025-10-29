@@ -1,5 +1,27 @@
 #![no_std]
 
+pub mod sonic {
+    pub mod fee_settlement {
+        pub mod program {
+            solana_pubkey::declare_id!("SonicFeeSet1ement11111111111111111111111111");
+        }
+
+        pub mod data_account {
+            solana_pubkey::declare_id!("SonicFeeSet1ementData1111111111111111111112");
+        }
+    }
+
+    pub mod account_migrater {
+        pub mod program {
+            solana_pubkey::declare_id!("SonicAccountMigrater11111111111111111111111");
+        }
+
+        pub mod migrated_accounts {
+            solana_pubkey::declare_id!("SonicMigratedAccounts1111111111111111111112");
+        }
+    }
+}
+
 pub mod address_lookup_table {
     solana_pubkey::declare_id!("AddressLookupTab1e1111111111111111111111111");
 }
