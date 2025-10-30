@@ -1,4 +1,6 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![deprecated(since = "2.2.2", note = "Use agave-precompiles instead")]
+#![allow(deprecated)]
 use {
     lazy_static::lazy_static, solana_feature_set::FeatureSet,
     solana_message::compiled_instruction::CompiledInstruction,
@@ -32,7 +34,7 @@ impl Precompile {
         F: Fn(&Pubkey) -> bool,
     {
         self.feature
-            .map_or(true, |ref feature_id| is_enabled(feature_id))
+            .is_none_or(|ref feature_id| is_enabled(feature_id))
             && self.program_id == *program_id
     }
     /// Verify this precompiled program

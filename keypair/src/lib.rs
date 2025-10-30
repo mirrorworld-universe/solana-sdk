@@ -7,7 +7,7 @@ use {
     rand0_7::{rngs::OsRng, CryptoRng, RngCore},
     solana_pubkey::Pubkey,
     solana_seed_phrase::generate_seed_from_seed_phrase_and_passphrase,
-    solana_signature::Signature,
+    solana_signature::{error::Error as SignatureError, Signature},
     solana_signer::{EncodableKey, EncodableKeypair, Signer, SignerError},
     std::{
         error,
@@ -25,11 +25,17 @@ pub mod signable;
 #[derive(Debug)]
 pub struct Keypair(ed25519_dalek::Keypair);
 
+pub const KEYPAIR_LENGTH: usize = 64;
+
 impl Keypair {
     /// Can be used for generating a Keypair without a dependency on `rand` types
     pub const SECRET_KEY_LENGTH: usize = 32;
 
     /// Constructs a new, random `Keypair` using a caller-provided RNG
+    #[deprecated(
+        since = "2.2.2",
+        note = "Use `Keypair::new()` instead or generate 32 random bytes and use `Keypair::new_from_array`"
+    )]
     pub fn generate<R>(csprng: &mut R) -> Self
     where
         R: CryptoRng + RngCore,
@@ -40,48 +46,51 @@ impl Keypair {
     /// Constructs a new, random `Keypair` using `OsRng`
     pub fn new() -> Self {
         let mut rng = OsRng;
-        Self::generate(&mut rng)
+        Self(ed25519_dalek::Keypair::generate(&mut rng))
+    }
+
+    /// Constructs a new `Keypair` using secret key bytes
+    pub fn new_from_array(secret_key: [u8; 32]) -> Self {
+        // unwrap is safe because the only error condition is an incorrect length
+        let secret = ed25519_dalek::SecretKey::from_bytes(&secret_key).unwrap();
+        let public = ed25519_dalek::PublicKey::from(&secret);
+        Self(ed25519_dalek::Keypair { secret, public })
     }
 
     /// Recovers a `Keypair` from a byte array
+    #[deprecated(since = "2.2.2", note = "Use Keypair::try_from(&[u8]) instead")]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, ed25519_dalek::SignatureError> {
-        if bytes.len() < ed25519_dalek::KEYPAIR_LENGTH {
-            return Err(ed25519_dalek::SignatureError::from_source(String::from(
-                "candidate keypair byte array is too short",
-            )));
-        }
-        let secret =
-            ed25519_dalek::SecretKey::from_bytes(&bytes[..ed25519_dalek::SECRET_KEY_LENGTH])?;
-        let public =
-            ed25519_dalek::PublicKey::from_bytes(&bytes[ed25519_dalek::SECRET_KEY_LENGTH..])?;
-        let expected_public = ed25519_dalek::PublicKey::from(&secret);
-        (public == expected_public)
-            .then_some(Self(ed25519_dalek::Keypair { secret, public }))
-            .ok_or(ed25519_dalek::SignatureError::from_source(String::from(
-                "keypair bytes do not specify same pubkey as derived from their secret key",
-            )))
+        Self::try_from(bytes).map_err(ed25519_dalek::SignatureError::from_source)
     }
 
     /// Returns this `Keypair` as a byte array
-    pub fn to_bytes(&self) -> [u8; 64] {
+    pub fn to_bytes(&self) -> [u8; KEYPAIR_LENGTH] {
         self.0.to_bytes()
     }
 
     /// Recovers a `Keypair` from a base58-encoded string
     pub fn from_base58_string(s: &str) -> Self {
         let mut buf = [0u8; ed25519_dalek::KEYPAIR_LENGTH];
-        bs58::decode(s).onto(&mut buf).unwrap();
-        Self::from_bytes(&buf).unwrap()
+        five8::decode_64(s, &mut buf).unwrap();
+        Self::try_from(&buf[..]).unwrap()
     }
 
     /// Returns this `Keypair` as a base58-encoded string
     pub fn to_base58_string(&self) -> String {
-        bs58::encode(&self.0.to_bytes()).into_string()
+        let mut out = [0u8; five8::BASE58_ENCODED_64_MAX_LEN];
+        let len = five8::encode_64(&self.0.to_bytes(), &mut out);
+        unsafe { String::from_utf8_unchecked(out[..len as usize].to_vec()) }
     }
 
     /// Gets this `Keypair`'s SecretKey
+    #[deprecated(since = "2.2.2", note = "Use secret_bytes()")]
     pub fn secret(&self) -> &ed25519_dalek::SecretKey {
         &self.0.secret
+    }
+
+    /// Gets this `Keypair`'s secret key bytes
+    pub fn secret_bytes(&self) -> &[u8; Self::SECRET_KEY_LENGTH] {
+        self.0.secret.as_bytes()
     }
 
     /// Allows Keypair cloning
@@ -97,6 +106,30 @@ impl Keypair {
             secret: ed25519_dalek::SecretKey::from_bytes(self.0.secret.as_bytes()).unwrap(),
             public: self.0.public,
         })
+    }
+}
+
+impl TryFrom<&[u8]> for Keypair {
+    type Error = SignatureError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        if bytes.len() < ed25519_dalek::KEYPAIR_LENGTH {
+            return Err(SignatureError::from_source(String::from(
+                "candidate keypair byte array is too short",
+            )));
+        }
+        let secret =
+            ed25519_dalek::SecretKey::from_bytes(&bytes[..ed25519_dalek::SECRET_KEY_LENGTH])
+                .map_err(SignatureError::from_source)?;
+        let public =
+            ed25519_dalek::PublicKey::from_bytes(&bytes[ed25519_dalek::SECRET_KEY_LENGTH..])
+                .map_err(SignatureError::from_source)?;
+        let expected_public = ed25519_dalek::PublicKey::from(&secret);
+        (public == expected_public)
+            .then_some(Self(ed25519_dalek::Keypair { secret, public }))
+            .ok_or(SignatureError::from_source(String::from(
+                "keypair bytes do not specify same pubkey as derived from their secret key",
+            )))
     }
 }
 
@@ -117,7 +150,7 @@ impl Keypair {
 
     /// Recover a `Keypair` from a `Uint8Array`
     pub fn fromBytes(bytes: &[u8]) -> Result<Keypair, JsValue> {
-        Keypair::from_bytes(bytes).map_err(|e| e.to_string().into())
+        Keypair::try_from(bytes).map_err(|e| e.to_string().into())
     }
 
     /// Return the `Pubkey` for this `Keypair`
@@ -128,6 +161,9 @@ impl Keypair {
     }
 }
 
+// This should also be marked deprecated, but it's not possible to put a
+// `#[deprecated]` attribute on a trait implementation.
+// Remove during the next major version bump.
 impl From<ed25519_dalek::Keypair> for Keypair {
     fn from(value: ed25519_dalek::Keypair) -> Self {
         Self(value)
@@ -223,8 +259,7 @@ pub fn read_keypair<R: Read>(reader: &mut R) -> Result<Keypair, Box<dyn error::E
         let parsed: u8 = element.parse()?;
         out[idx] = parsed;
     }
-    Keypair::from_bytes(&out)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()).into())
+    Keypair::try_from(&out[..]).map_err(|e| std::io::Error::other(e.to_string()).into())
 }
 
 /// Reads a `Keypair` from a file

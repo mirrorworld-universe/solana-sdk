@@ -2,7 +2,7 @@
 name = "solana-logger"
 description = "Solana Logger"
 documentation = "https://docs.rs/solana-logger"
-version = "2.2.1"
+version = "2.3.1"
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
@@ -13,6 +13,10 @@ edition = { workspace = true }
 env_logger = { workspace = true }
 lazy_static = { workspace = true }
 log = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+libc = { workspace = true }
+signal-hook = { workspace = true }
 
 [lib]
 name = "solana_logger"

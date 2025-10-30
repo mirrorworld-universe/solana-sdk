@@ -15,7 +15,6 @@ use {
     chrono::{TimeZone, Utc},
     memmap2::Mmap,
     solana_hash::Hash,
-    solana_native_token::lamports_to_sol,
     solana_sha256_hasher::hash,
     solana_shred_version::compute_shred_version,
     std::{
@@ -161,37 +160,23 @@ impl GenesisConfig {
             .read(true)
             .open(&filename)
             .map_err(|err| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Unable to open {filename:?}: {err:?}"),
-                )
+                std::io::Error::other(format!("Unable to open {filename:?}: {err:?}"))
             })?;
 
         //UNSAFE: Required to create a Mmap
-        let mem = unsafe { Mmap::map(&file) }.map_err(|err| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Unable to map {filename:?}: {err:?}"),
-            )
-        })?;
+        let mem = unsafe { Mmap::map(&file) }
+            .map_err(|err| std::io::Error::other(format!("Unable to map {filename:?}: {err:?}")))?;
 
         let genesis_config = deserialize(&mem).map_err(|err| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Unable to deserialize {filename:?}: {err:?}"),
-            )
+            std::io::Error::other(format!("Unable to deserialize {filename:?}: {err:?}"))
         })?;
         Ok(genesis_config)
     }
 
     #[cfg(feature = "serde")]
     pub fn write(&self, ledger_path: &Path) -> Result<(), std::io::Error> {
-        let serialized = serialize(&self).map_err(|err| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Unable to serialize: {err:?}"),
-            )
-        })?;
+        let serialized = serialize(&self)
+            .map_err(|err| std::io::Error::other(format!("Unable to serialize: {err:?}")))?;
 
         std::fs::create_dir_all(ledger_path)?;
 
@@ -250,7 +235,7 @@ impl fmt::Display for GenesisConfig {
              {:?}\n\
              {:?}\n\
              {:?}\n\
-             Capitalization: {} SOL in {} accounts\n\
+             Capitalization: {} lamports in {} accounts\n\
              Native instruction processors: {:#?}\n\
              Rewards pool: {:#?}\n\
              ",
@@ -273,15 +258,13 @@ impl fmt::Display for GenesisConfig {
             self.inflation,
             self.rent,
             self.fee_rate_governor,
-            lamports_to_sol(
-                self.accounts
-                    .iter()
-                    .map(|(pubkey, account)| {
-                        assert!(account.lamports > 0, "{:?}", (pubkey, account));
-                        account.lamports
-                    })
-                    .sum::<u64>()
-            ),
+            self.accounts
+                .iter()
+                .map(|(pubkey, account)| {
+                    assert!(account.lamports > 0, "{:?}", (pubkey, account));
+                    account.lamports
+                })
+                .sum::<u64>(),
             self.accounts.len(),
             self.native_instruction_processors,
             self.rewards_pools,

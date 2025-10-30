@@ -10,6 +10,7 @@ homepage = { workspace = true }
 license = { workspace = true }
 edition = { workspace = true }
 rust-version = "1.79.0"                          # solana platform-tools rust version
+include = ["src/**/*", "README.md"]
 
 [dependencies]
 bincode = { workspace = true }
@@ -51,6 +52,7 @@ solana-instruction = { workspace = true, default-features = false, features = [
     "bincode",
     "serde",
     "std",
+    "syscalls",
 ] }
 solana-instructions-sysvar = { workspace = true }
 solana-keccak-hasher = { workspace = true, features = ["sha3"] }
@@ -140,7 +142,7 @@ borsh = [
     "solana-pubkey/borsh",
     "solana-stake-interface/borsh",
 ]
-dev-context-only-utils = []
+dev-context-only-utils = ["solana-instructions-sysvar/dev-context-only-utils"]
 frozen-abi = [
     "dep:solana-frozen-abi",
     "dep:solana-frozen-abi-macro",

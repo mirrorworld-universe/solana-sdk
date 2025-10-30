@@ -3,12 +3,13 @@ name = "solana-sdk"
 description = "Solana SDK"
 documentation = "https://docs.rs/solana-sdk"
 readme = "README.md"
-version = "2.2.1"
+version = "2.2.2"
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 license = { workspace = true }
 edition = { workspace = true }
+include = ["src/**/*", "README.md"]
 
 [features]
 # "program" feature is a legacy feature retained to support v1.3 and older
@@ -174,7 +175,7 @@ solana-validator-exit = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.1", features = ["wasm-bindgen"] }
+getrandom = { version = "0.1.1", features = ["wasm-bindgen"] }
 js-sys = { workspace = true }
 wasm-bindgen = { workspace = true }
 

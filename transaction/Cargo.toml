@@ -2,7 +2,7 @@
 name = "solana-transaction"
 description = "Solana transaction-types"
 documentation = "https://docs.rs/solana-transaction"
-version = "2.2.1"
+version = "2.2.3"
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
@@ -23,7 +23,6 @@ solana-logger = { workspace = true, optional = true }
 solana-message = { workspace = true }
 solana-precompiles = { workspace = true, optional = true }
 solana-pubkey = { workspace = true }
-solana-reserved-account-keys = { workspace = true, optional = true }
 solana-sanitize = { workspace = true }
 solana-sdk-ids = { workspace = true }
 solana-short-vec = { workspace = true, optional = true }
@@ -46,11 +45,11 @@ solana-keypair = { workspace = true }
 solana-nonce = { workspace = true }
 solana-packet = { workspace = true }
 solana-presigner = { workspace = true }
-solana-program = { workspace = true, default-features = false }
 solana-pubkey = { workspace = true, features = ["rand"] }
 solana-sdk = { path = "../sdk" }
 solana-sha256-hasher = { workspace = true }
 solana-transaction = { path = ".", features = ["dev-context-only-utils"] }
+solana-vote-interface = { workspace = true }
 static_assertions = { workspace = true }
 
 [features]
@@ -63,7 +62,6 @@ bincode = [
     "solana-message/bincode",
 ]
 blake3 = [
-    "dep:solana-reserved-account-keys",
     "bincode",
     "solana-message/blake3",
 ]

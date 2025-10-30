@@ -18,10 +18,12 @@ use {
         slice::{from_raw_parts, from_raw_parts_mut},
     },
 };
-// need to re-export msg for custom_heap_default macro
+// need to re-export msg for custom_heap_default macro, `AccountInfo` and `Pubkey` for
+// entrypoint_no_alloc macro
 pub use {
+    solana_account_info::AccountInfo as __AccountInfo,
     solana_account_info::MAX_PERMITTED_DATA_INCREASE, solana_msg::msg as __msg,
-    solana_program_error::ProgramResult,
+    solana_program_error::ProgramResult, solana_pubkey::Pubkey as __Pubkey,
 };
 
 /// User implemented function to process an instruction
@@ -167,18 +169,23 @@ macro_rules! entrypoint_no_alloc {
             // and the only way to do it is through a `const` expression, and
             // we don't expect to mutate the internals of this `const` type.
             #[allow(clippy::declare_interior_mutable_const)]
-            const UNINIT_ACCOUNT_INFO: MaybeUninit<AccountInfo> =
-                MaybeUninit::<AccountInfo>::uninit();
+            const UNINIT_ACCOUNT_INFO: MaybeUninit<$crate::__AccountInfo> =
+                MaybeUninit::<$crate::__AccountInfo>::uninit();
             const MAX_ACCOUNT_INFOS: usize = 64;
             let mut accounts = [UNINIT_ACCOUNT_INFO; MAX_ACCOUNT_INFOS];
             let (program_id, num_accounts, instruction_data) =
                 unsafe { $crate::deserialize_into(input, &mut accounts) };
             // Use `slice_assume_init_ref` once it's stabilized
-            let accounts = &*(&accounts[..num_accounts] as *const [MaybeUninit<AccountInfo<'_>>]
-                as *const [AccountInfo<'_>]);
+            let accounts = &*(&accounts[..num_accounts]
+                as *const [MaybeUninit<$crate::__AccountInfo<'_>>]
+                as *const [$crate::__AccountInfo<'_>]);
 
             #[inline(never)]
-            fn call_program(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> u64 {
+            fn call_program(
+                program_id: &$crate::__Pubkey,
+                accounts: &[$crate::__AccountInfo],
+                data: &[u8],
+            ) -> u64 {
                 match $process_instruction(program_id, accounts, data) {
                     Ok(()) => $crate::SUCCESS,
                     Err(error) => error.into(),
@@ -281,18 +288,61 @@ macro_rules! custom_panic_default {
 
 /// The bump allocator used as the default rust heap when running programs.
 pub struct BumpAllocator {
+    #[deprecated(
+        since = "2.2.2",
+        note = "This field should not be accessed directly. It will become private in future versions"
+    )]
     pub start: usize,
+    #[deprecated(
+        since = "2.2.2",
+        note = "This field should not be accessed directly. It will become private in future versions"
+    )]
     pub len: usize,
 }
+
+impl BumpAllocator {
+    /// Creates the allocator tied to a provided slice.
+    /// This will not initialize the provided memory, except for the first
+    /// bytes where the pointer is stored.
+    ///
+    /// # Safety
+    /// As long as BumpAllocator or any of its allocations are alive,
+    /// writing into or deallocating the arena will cause UB.
+    ///
+    /// Integer arithmetic in this global allocator implementation is safe when
+    /// operating on the prescribed `HEAP_START_ADDRESS` and `HEAP_LENGTH`. Any
+    /// other use may overflow and is thus unsupported and at one's own risk.
+    #[inline]
+    #[allow(clippy::arithmetic_side_effects)]
+    pub unsafe fn new(arena: &mut [u8]) -> Self {
+        debug_assert!(
+            arena.len() > size_of::<usize>(),
+            "Arena should be larger than usize"
+        );
+
+        // create a pointer to the start of the arena
+        // that will hold an address of the byte following free space
+        let pos_ptr = arena.as_mut_ptr() as *mut usize;
+        // initialize the data there
+        *pos_ptr = pos_ptr as usize + arena.len();
+
+        #[allow(deprecated)] //we get to use deprecated pub fields
+        Self {
+            start: pos_ptr as usize,
+            len: arena.len(),
+        }
+    }
+}
+
 /// Integer arithmetic in this global allocator implementation is safe when
 /// operating on the prescribed `HEAP_START_ADDRESS` and `HEAP_LENGTH`. Any
 /// other use may overflow and is thus unsupported and at one's own risk.
 #[allow(clippy::arithmetic_side_effects)]
 unsafe impl std::alloc::GlobalAlloc for BumpAllocator {
     #[inline]
+    #[allow(deprecated)] //we get to use deprecated pub fields
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let pos_ptr = self.start as *mut usize;
-
         let mut pos = *pos_ptr;
         if pos == 0 {
             // First time, set starting position
@@ -513,19 +563,13 @@ mod test {
     fn test_bump_allocator() {
         // alloc the entire
         {
-            let heap = [0u8; 128];
-            let allocator = BumpAllocator {
-                start: heap.as_ptr() as *const _ as usize,
-                len: heap.len(),
-            };
+            let mut heap = [0u8; 128];
+            let allocator = unsafe { BumpAllocator::new(&mut heap) };
             for i in 0..128 - size_of::<*mut u8>() {
                 let ptr = unsafe {
                     allocator.alloc(Layout::from_size_align(1, size_of::<u8>()).unwrap())
                 };
-                assert_eq!(
-                    ptr as *const _ as usize,
-                    heap.as_ptr() as *const _ as usize + heap.len() - 1 - i
-                );
+                assert_eq!(ptr as usize, heap.as_ptr() as usize + heap.len() - 1 - i);
             }
             assert_eq!(null_mut(), unsafe {
                 allocator.alloc(Layout::from_size_align(1, 1).unwrap())
@@ -533,11 +577,8 @@ mod test {
         }
         // check alignment
         {
-            let heap = [0u8; 128];
-            let allocator = BumpAllocator {
-                start: heap.as_ptr() as *const _ as usize,
-                len: heap.len(),
-            };
+            let mut heap = [0u8; 128];
+            let allocator = unsafe { BumpAllocator::new(&mut heap) };
             let ptr =
                 unsafe { allocator.alloc(Layout::from_size_align(1, size_of::<u8>()).unwrap()) };
             assert_eq!(0, ptr.align_offset(size_of::<u8>()));
@@ -558,13 +599,14 @@ mod test {
         }
         // alloc entire block (minus the pos ptr)
         {
-            let heap = [0u8; 128];
-            let allocator = BumpAllocator {
-                start: heap.as_ptr() as *const _ as usize,
-                len: heap.len(),
+            let mut heap = [0u8; 128];
+            let allocator = unsafe { BumpAllocator::new(&mut heap) };
+            let ptr = unsafe {
+                allocator.alloc(
+                    Layout::from_size_align(heap.len() - size_of::<usize>(), size_of::<u8>())
+                        .unwrap(),
+                )
             };
-            let ptr =
-                unsafe { allocator.alloc(Layout::from_size_align(120, size_of::<u8>()).unwrap()) };
             assert_ne!(ptr, null_mut());
             assert_eq!(0, ptr.align_offset(size_of::<u64>()));
         }

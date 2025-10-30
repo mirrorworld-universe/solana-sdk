@@ -6,8 +6,10 @@
 use core::convert::TryInto;
 use core::{
     fmt,
-    str::{from_utf8, FromStr},
+    str::{from_utf8_unchecked, FromStr},
 };
+#[cfg(feature = "alloc")]
+extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 #[cfg(feature = "std")]
@@ -17,6 +19,8 @@ use {
     serde_big_array::BigArray,
     serde_derive::{Deserialize, Serialize},
 };
+
+pub mod error;
 
 /// Number of bytes in a signature
 pub const SIGNATURE_BYTES: usize = 64;
@@ -38,6 +42,14 @@ impl Default for Signature {
 }
 
 impl solana_sanitize::Sanitize for Signature {}
+
+impl Signature {
+    /// Return a reference to the `Signature`'s byte array.
+    #[inline(always)]
+    pub const fn as_array(&self) -> &[u8; SIGNATURE_BYTES] {
+        &self.0
+    }
+}
 
 #[cfg(feature = "rand")]
 impl Signature {
@@ -71,11 +83,9 @@ impl AsRef<[u8]> for Signature {
 
 fn write_as_base58(f: &mut fmt::Formatter, s: &Signature) -> fmt::Result {
     let mut out = [0u8; MAX_BASE58_SIGNATURE_LEN];
-    let out_slice: &mut [u8] = &mut out;
-    // This will never fail because the only possible error is BufferTooSmall,
-    // and we will never call it with too small a buffer.
-    let len = bs58::encode(s.0).onto(out_slice).unwrap();
-    let as_str = from_utf8(&out[..len]).unwrap();
+    let len = five8::encode_64(&s.0, &mut out) as usize;
+    // any sequence of base58 chars is valid utf8
+    let as_str = unsafe { from_utf8_unchecked(&out[..len]) };
     f.write_str(as_str)
 }
 
@@ -147,18 +157,19 @@ impl FromStr for Signature {
     type Err = ParseSignatureError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use five8::DecodeError;
         if s.len() > MAX_BASE58_SIGNATURE_LEN {
             return Err(ParseSignatureError::WrongSize);
         }
         let mut bytes = [0; SIGNATURE_BYTES];
-        let decoded_size = bs58::decode(s)
-            .onto(&mut bytes)
-            .map_err(|_| ParseSignatureError::Invalid)?;
-        if decoded_size != SIGNATURE_BYTES {
-            Err(ParseSignatureError::WrongSize)
-        } else {
-            Ok(bytes.into())
-        }
+        five8::decode_64(s, &mut bytes).map_err(|e| match e {
+            DecodeError::InvalidChar(_) => ParseSignatureError::Invalid,
+            DecodeError::TooLong
+            | DecodeError::TooShort
+            | DecodeError::LargestTermTooHigh
+            | DecodeError::OutputTooLong => ParseSignatureError::WrongSize,
+        })?;
+        Ok(Self::from(bytes))
     }
 }
 
@@ -272,5 +283,18 @@ mod tests {
             too_long.parse::<Signature>(),
             Err(ParseSignatureError::WrongSize)
         );
+    }
+
+    #[test]
+    fn test_as_array() {
+        let bytes = [1u8; 64];
+        let signature = Signature::from(bytes);
+        assert_eq!(signature.as_array(), &bytes);
+        assert_eq!(
+            signature.as_array(),
+            &<Signature as Into<[u8; 64]>>::into(signature)
+        );
+        // Sanity check: ensure the pointer is the same.
+        assert_eq!(signature.as_array().as_ptr(), signature.0.as_ptr());
     }
 }

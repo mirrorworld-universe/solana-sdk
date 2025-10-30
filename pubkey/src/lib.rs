@@ -23,17 +23,19 @@ use {
     core::{
         array,
         convert::{Infallible, TryFrom},
-        fmt, mem,
-        str::{from_utf8, FromStr},
+        fmt,
+        hash::{Hash, Hasher},
+        mem,
+        str::{from_utf8_unchecked, FromStr},
     },
     num_traits::{FromPrimitive, ToPrimitive},
-    solana_decode_error::DecodeError,
 };
 #[cfg(target_arch = "wasm32")]
 use {
     js_sys::{Array, Uint8Array},
     wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue},
 };
+
 #[cfg(target_os = "solana")]
 pub mod syscalls;
 
@@ -117,7 +119,8 @@ impl fmt::Display for PubkeyError {
     }
 }
 
-impl<T> DecodeError<T> for PubkeyError {
+#[allow(deprecated)]
+impl<T> solana_decode_error::DecodeError<T> for PubkeyError {
     fn type_of() -> &'static str {
         "PubkeyError"
     }
@@ -158,9 +161,164 @@ impl From<u64> for PubkeyError {
 #[cfg_attr(all(feature = "borsh", feature = "std"), derive(BorshSchema))]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "bytemuck", derive(Pod, Zeroable))]
-#[derive(Clone, Copy, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "dev-context-only-utils", derive(Arbitrary))]
 pub struct Pubkey(pub(crate) [u8; 32]);
+
+/// Custom impl of Hash for Pubkey
+/// allows us to skip hashing the length of the pubkey
+/// which is always the same anyway
+impl Hash for Pubkey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write(self.as_array());
+    }
+}
+
+#[cfg(all(feature = "rand", not(target_os = "solana")))]
+mod hasher {
+    use {
+        crate::PUBKEY_BYTES,
+        core::{
+            cell::Cell,
+            hash::{BuildHasher, Hasher},
+            mem,
+        },
+        rand::{thread_rng, Rng},
+    };
+
+    /// A faster, but less collision resistant hasher for pubkeys.
+    ///
+    /// Specialized hasher that uses a random 8 bytes subslice of the
+    /// pubkey as the hash value. Should not be used when collisions
+    /// might be used to mount DOS attacks.
+    ///
+    /// Using this results in about 4x faster lookups in a typical hashmap.
+    #[derive(Default)]
+    pub struct PubkeyHasher {
+        offset: usize,
+        state: u64,
+    }
+
+    impl Hasher for PubkeyHasher {
+        #[inline]
+        fn finish(&self) -> u64 {
+            self.state
+        }
+        #[inline]
+        fn write(&mut self, bytes: &[u8]) {
+            debug_assert_eq!(
+                bytes.len(),
+                PUBKEY_BYTES,
+                "This hasher is intended to be used with pubkeys and nothing else"
+            );
+            // This slice/unwrap can never panic since offset is < PUBKEY_BYTES - mem::size_of::<u64>()
+            let chunk: &[u8; mem::size_of::<u64>()] = bytes
+                [self.offset..self.offset + mem::size_of::<u64>()]
+                .try_into()
+                .unwrap();
+            self.state = u64::from_ne_bytes(*chunk);
+        }
+    }
+
+    /// A builder for faster, but less collision resistant hasher for pubkeys.
+    ///
+    /// Initializes `PubkeyHasher` instances that use an 8-byte
+    /// slice of the pubkey as the hash value. Should not be used when
+    /// collisions might be used to mount DOS attacks.
+    ///
+    /// Using this results in about 4x faster lookups in a typical hashmap.
+    #[derive(Clone)]
+    pub struct PubkeyHasherBuilder {
+        offset: usize,
+    }
+
+    impl Default for PubkeyHasherBuilder {
+        /// Default construct the PubkeyHasherBuilder.
+        ///
+        /// The position of the slice is determined initially
+        /// through random draw and then by incrementing a thread-local
+        /// This way each hashmap can be expected to use a slightly different
+        /// slice. This is essentially the same mechanism as what is used by
+        /// `RandomState`
+        fn default() -> Self {
+            std::thread_local!(static OFFSET: Cell<usize>  = {
+                let mut rng = thread_rng();
+                Cell::new(rng.gen_range(0..PUBKEY_BYTES - mem::size_of::<u64>()))
+            });
+
+            let offset = OFFSET.with(|offset| {
+                let mut next_offset = offset.get() + 1;
+                if next_offset > PUBKEY_BYTES - mem::size_of::<u64>() {
+                    next_offset = 0;
+                }
+                offset.set(next_offset);
+                next_offset
+            });
+            PubkeyHasherBuilder { offset }
+        }
+    }
+
+    impl BuildHasher for PubkeyHasherBuilder {
+        type Hasher = PubkeyHasher;
+        #[inline]
+        fn build_hasher(&self) -> Self::Hasher {
+            PubkeyHasher {
+                offset: self.offset,
+                state: 0,
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use {
+            super::PubkeyHasherBuilder,
+            crate::Pubkey,
+            core::hash::{BuildHasher, Hasher},
+        };
+        #[test]
+        fn test_pubkey_hasher_builder() {
+            let key = Pubkey::new_unique();
+            let builder = PubkeyHasherBuilder::default();
+            let mut hasher1 = builder.build_hasher();
+            let mut hasher2 = builder.build_hasher();
+            hasher1.write(key.as_array());
+            hasher2.write(key.as_array());
+            assert_eq!(
+                hasher1.finish(),
+                hasher2.finish(),
+                "Hashers made with same builder should be identical"
+            );
+            // Make sure that when we make new builders we get different slices
+            // chosen for hashing
+            let builder2 = PubkeyHasherBuilder::default();
+            for _ in 0..64 {
+                let mut hasher3 = builder2.build_hasher();
+                hasher3.write(key.as_array());
+                std::dbg!(hasher1.finish());
+                std::dbg!(hasher3.finish());
+                if hasher1.finish() != hasher3.finish() {
+                    return;
+                }
+            }
+            panic!("Hashers built with different builder should be different due to random offset");
+        }
+
+        #[test]
+        fn test_pubkey_hasher() {
+            let key1 = Pubkey::new_unique();
+            let key2 = Pubkey::new_unique();
+            let builder = PubkeyHasherBuilder::default();
+            let mut hasher1 = builder.build_hasher();
+            let mut hasher2 = builder.build_hasher();
+            hasher1.write(key1.as_array());
+            hasher2.write(key2.as_array());
+            assert_ne!(hasher1.finish(), hasher2.finish());
+        }
+    }
+}
+#[cfg(all(feature = "rand", not(target_os = "solana")))]
+pub use hasher::{PubkeyHasher, PubkeyHasherBuilder};
 
 impl solana_sanitize::Sanitize for Pubkey {}
 
@@ -223,7 +381,8 @@ impl From<Infallible> for ParsePubkeyError {
     }
 }
 
-impl<T> DecodeError<T> for ParsePubkeyError {
+#[allow(deprecated)]
+impl<T> solana_decode_error::DecodeError<T> for ParsePubkeyError {
     fn type_of() -> &'static str {
         "ParsePubkeyError"
     }
@@ -233,18 +392,26 @@ impl FromStr for Pubkey {
     type Err = ParsePubkeyError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use five8::DecodeError;
         if s.len() > MAX_BASE58_LEN {
             return Err(ParsePubkeyError::WrongSize);
         }
         let mut bytes = [0; PUBKEY_BYTES];
-        let decoded_size = bs58::decode(s)
-            .onto(&mut bytes)
-            .map_err(|_| ParsePubkeyError::Invalid)?;
-        if decoded_size != mem::size_of::<Pubkey>() {
-            Err(ParsePubkeyError::WrongSize)
-        } else {
-            Ok(Pubkey(bytes))
-        }
+        five8::decode_32(s, &mut bytes).map_err(|e| match e {
+            DecodeError::InvalidChar(_) => ParsePubkeyError::Invalid,
+            DecodeError::TooLong
+            | DecodeError::TooShort
+            | DecodeError::LargestTermTooHigh
+            | DecodeError::OutputTooLong => ParsePubkeyError::WrongSize,
+        })?;
+        Ok(Pubkey(bytes))
+    }
+}
+
+impl From<&Pubkey> for Pubkey {
+    #[inline]
+    fn from(value: &Pubkey) -> Self {
+        *value
     }
 }
 
@@ -315,12 +482,35 @@ impl Pubkey {
     pub fn new_unique() -> Self {
         use solana_atomic_u64::AtomicU64;
         static I: AtomicU64 = AtomicU64::new(1);
-
-        let mut b = [0u8; 32];
-        let i = I.fetch_add(1);
+        type T = u32;
+        const COUNTER_BYTES: usize = mem::size_of::<T>();
+        let mut b = [0u8; PUBKEY_BYTES];
+        #[cfg(any(feature = "std", target_arch = "wasm32"))]
+        let mut i = I.fetch_add(1) as T;
+        #[cfg(not(any(feature = "std", target_arch = "wasm32")))]
+        let i = I.fetch_add(1) as T;
         // use big endian representation to ensure that recent unique pubkeys
-        // are always greater than less recent unique pubkeys
-        b[0..8].copy_from_slice(&i.to_be_bytes());
+        // are always greater than less recent unique pubkeys.
+        b[0..COUNTER_BYTES].copy_from_slice(&i.to_be_bytes());
+        // fill the rest of the pubkey with pseudorandom numbers to make
+        // data statistically similar to real pubkeys.
+        #[cfg(any(feature = "std", target_arch = "wasm32"))]
+        {
+            let mut hash = std::hash::DefaultHasher::new();
+            for slice in b[COUNTER_BYTES..].chunks_mut(COUNTER_BYTES) {
+                hash.write_u32(i);
+                i += 1;
+                slice.copy_from_slice(&hash.finish().to_ne_bytes()[0..COUNTER_BYTES]);
+            }
+        }
+        // if std is not available, just replicate last byte of the counter.
+        // this is not as good as a proper hash, but at least it is uniform
+        #[cfg(not(any(feature = "std", target_arch = "wasm32")))]
+        {
+            for b in b[COUNTER_BYTES..].iter_mut() {
+                *b = (i & 0xFF) as u8;
+            }
+        }
         Self::from(b)
     }
 
@@ -811,11 +1001,9 @@ impl AsMut<[u8]> for Pubkey {
 
 fn write_as_base58(f: &mut fmt::Formatter, p: &Pubkey) -> fmt::Result {
     let mut out = [0u8; MAX_BASE58_LEN];
-    let out_slice: &mut [u8] = &mut out;
-    // This will never fail because the only possible error is BufferTooSmall,
-    // and we will never call it with too small a buffer.
-    let len = bs58::encode(p.0).onto(out_slice).unwrap();
-    let as_str = from_utf8(&out[..len]).unwrap();
+    let len = five8::encode_32(&p.0, &mut out) as usize;
+    // any sequence of base58 chars is valid utf8
+    let as_str = unsafe { from_utf8_unchecked(&out[..len]) };
     f.write_str(as_str)
 }
 
@@ -1128,7 +1316,7 @@ pub fn new_rand() -> Pubkey {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, strum::IntoEnumIterator};
+    use {super::*, core::str::from_utf8, strum::IntoEnumIterator};
 
     #[test]
     fn test_new_unique() {

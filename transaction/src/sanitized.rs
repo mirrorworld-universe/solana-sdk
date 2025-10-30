@@ -13,10 +13,7 @@ use {
     std::collections::HashSet,
 };
 #[cfg(feature = "blake3")]
-use {
-    crate::Transaction, solana_reserved_account_keys::ReservedAccountKeys,
-    solana_sanitize::Sanitize,
-};
+use {crate::Transaction, solana_sanitize::Sanitize};
 
 /// Maximum number of accounts that a transaction may lock.
 /// 128 was chosen because it is the minimum number of accounts
@@ -142,7 +139,8 @@ impl SanitizedTransaction {
     /// Create a sanitized transaction from a legacy transaction. Used for tests only.
     #[cfg(feature = "blake3")]
     pub fn from_transaction_for_tests(tx: Transaction) -> Self {
-        Self::try_from_legacy_transaction(tx, &ReservedAccountKeys::empty_key_set()).unwrap()
+        let empty_key_set = HashSet::default();
+        Self::try_from_legacy_transaction(tx, &empty_key_set).unwrap()
     }
 
     /// Create a sanitized transaction from fields.
@@ -287,6 +285,8 @@ impl SanitizedTransaction {
     }
 
     #[cfg(feature = "precompiles")]
+    #[deprecated(since = "2.2.3", note = "Use agave-precompiles instead")]
+    #[allow(deprecated)]
     /// Verify the precompiled programs in this transaction
     pub fn verify_precompiles(&self, feature_set: &solana_feature_set::FeatureSet) -> Result<()> {
         for (index, (program_id, instruction)) in
@@ -344,21 +344,20 @@ mod tests {
         super::*,
         solana_keypair::Keypair,
         solana_message::{MessageHeader, SimpleAddressLoader},
-        solana_program::vote::{self, state::Vote},
-        solana_reserved_account_keys::ReservedAccountKeys,
         solana_signer::Signer,
+        solana_vote_interface::{instruction, state::Vote},
     };
 
     #[test]
     fn test_try_create_simple_vote_tx() {
         let bank_hash = Hash::default();
         let block_hash = Hash::default();
+        let empty_key_set = HashSet::default();
         let vote_keypair = Keypair::new();
         let node_keypair = Keypair::new();
         let auth_keypair = Keypair::new();
         let votes = Vote::new(vec![1, 2, 3], bank_hash);
-        let vote_ix =
-            vote::instruction::vote(&vote_keypair.pubkey(), &auth_keypair.pubkey(), votes);
+        let vote_ix = instruction::vote(&vote_keypair.pubkey(), &auth_keypair.pubkey(), votes);
         let mut vote_tx = Transaction::new_with_payer(&[vote_ix], Some(&node_keypair.pubkey()));
         vote_tx.partial_sign(&[&node_keypair], block_hash);
         vote_tx.partial_sign(&[&auth_keypair], block_hash);
@@ -370,7 +369,7 @@ mod tests {
                 MessageHash::Compute,
                 None,
                 SimpleAddressLoader::Disabled,
-                &ReservedAccountKeys::empty_key_set(),
+                &empty_key_set,
             )
             .unwrap();
             assert!(vote_transaction.is_simple_vote_transaction());
@@ -383,7 +382,7 @@ mod tests {
                 MessageHash::Compute,
                 Some(false),
                 SimpleAddressLoader::Disabled,
-                &ReservedAccountKeys::empty_key_set(),
+                &empty_key_set,
             )
             .unwrap();
             assert!(!vote_transaction.is_simple_vote_transaction());
@@ -398,7 +397,7 @@ mod tests {
                 MessageHash::Compute,
                 None,
                 SimpleAddressLoader::Disabled,
-                &ReservedAccountKeys::empty_key_set(),
+                &empty_key_set,
             )
             .unwrap();
             assert!(!vote_transaction.is_simple_vote_transaction());
@@ -411,7 +410,7 @@ mod tests {
                 MessageHash::Compute,
                 Some(true),
                 SimpleAddressLoader::Disabled,
-                &ReservedAccountKeys::empty_key_set(),
+                &empty_key_set,
             )
             .unwrap();
             assert!(vote_transaction.is_simple_vote_transaction());
