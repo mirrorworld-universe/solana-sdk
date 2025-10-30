@@ -233,6 +233,17 @@ impl Default for FeeStructure {
                 limit: 1_400_000,
                 fee: 0,
             }],
+            sonic_fee_multiplier: {
+                //Sonic: get fee multiplier from environment variable
+                let mut sonic_fee_multiplier = 10_000;
+
+                if let Ok(env) = std::env::var("SONIC_FEE_MULTIPLIER") {
+                    if let Ok(res) = env.parse() {
+                        sonic_fee_multiplier = res;
+                    }
+                }
+                sonic_fee_multiplier
+            },
         }
     }
 }

@@ -2584,7 +2584,7 @@ dependencies = [
 
 [[package]]
 name = "solana-account-info"
-version = "2.2.1"
+version = "2.3.0"
 dependencies = [
  "bincode",
  "serde",
@@ -3103,7 +3103,7 @@ dependencies = [
 
 [[package]]
 name = "solana-keypair"
-version = "2.2.2"
+version = "2.2.3"
 dependencies = [
  "ed25519-dalek",
  "ed25519-dalek-bip32",
@@ -3233,7 +3233,7 @@ dependencies = [
 
 [[package]]
 name = "solana-native-token"
-version = "2.2.2"
+version = "2.3.0"
 
 [[package]]
 name = "solana-nonce"
@@ -3445,7 +3445,7 @@ dependencies = [
 
 [[package]]
 name = "solana-program-entrypoint"
-version = "2.2.1"
+version = "2.3.0"
 dependencies = [
  "solana-account-info",
  "solana-msg",
@@ -3469,7 +3469,7 @@ dependencies = [
 
 [[package]]
 name = "solana-program-memory"
-version = "2.2.1"
+version = "2.3.1"
 dependencies = [
  "solana-define-syscall",
 ]
