@@ -1,8 +1,4 @@
 //! The Rust-based BPF program entrypoint supported by the latest BPF loader.
-//!
-//! For more information see the [`bpf_loader`] module.
-//!
-//! [`bpf_loader`]: crate::bpf_loader
 
 extern crate alloc;
 use {
@@ -11,10 +7,8 @@ use {
     solana_pubkey::Pubkey,
     std::{
         alloc::Layout,
-        cell::RefCell,
         mem::{size_of, MaybeUninit},
         ptr::null_mut,
-        rc::Rc,
         slice::{from_raw_parts, from_raw_parts_mut},
     },
 };
@@ -22,8 +16,12 @@ use {
 // entrypoint_no_alloc macro
 pub use {
     solana_account_info::AccountInfo as __AccountInfo,
-    solana_account_info::MAX_PERMITTED_DATA_INCREASE, solana_msg::msg as __msg,
-    solana_program_error::ProgramResult, solana_pubkey::Pubkey as __Pubkey,
+    solana_account_info::MAX_PERMITTED_DATA_INCREASE,
+    // Re-exporting for custom_panic
+    solana_define_syscall::definitions::{sol_log_ as __log, sol_panic_ as __panic},
+    solana_msg::msg as __msg,
+    solana_program_error::ProgramResult,
+    solana_pubkey::Pubkey as __Pubkey,
 };
 
 /// User implemented function to process an instruction
@@ -223,10 +221,11 @@ macro_rules! custom_heap_default {
     () => {
         #[cfg(all(not(feature = "custom-heap"), target_os = "solana"))]
         #[global_allocator]
-        #[allow(deprecated)] //we get to use deprecated pub fields
-        static A: $crate::BumpAllocator = $crate::BumpAllocator {
-            start: $crate::HEAP_START_ADDRESS as usize,
-            len: $crate::HEAP_LENGTH,
+        static A: $crate::BumpAllocator = unsafe {
+            $crate::BumpAllocator::with_fixed_address_range(
+                $crate::HEAP_START_ADDRESS as usize,
+                $crate::HEAP_LENGTH,
+            )
         };
     };
 }
@@ -234,8 +233,8 @@ macro_rules! custom_heap_default {
 /// Define the default global panic handler.
 ///
 /// This must be used if the [`entrypoint`] macro is not used, and no other
-/// panic handler has been defined; otherwise compilation will fail with a
-/// missing `custom_panic` symbol.
+/// panic handler has been defined; otherwise a program will crash without an
+/// explicit panic message.
 ///
 /// The default global allocator is enabled only if the calling crate has not
 /// disabled it using [Cargo features] as described below. It is only defined
@@ -273,32 +272,36 @@ macro_rules! custom_heap_default {
 ///     $crate::msg!("{}", info);
 /// }
 /// ```
-///
-/// The above is how Solana defines the default panic handler.
 #[macro_export]
 macro_rules! custom_panic_default {
     () => {
         #[cfg(all(not(feature = "custom-panic"), target_os = "solana"))]
         #[no_mangle]
         fn custom_panic(info: &core::panic::PanicInfo<'_>) {
-            // Full panic reporting
-            $crate::__msg!("{}", info);
+            if let Some(mm) = info.message().as_str() {
+                unsafe {
+                    $crate::__log(mm.as_ptr(), mm.len() as u64);
+                }
+            }
+
+            if let Some(loc) = info.location() {
+                unsafe {
+                    $crate::__panic(
+                        loc.file().as_ptr(),
+                        loc.file().len() as u64,
+                        loc.line() as u64,
+                        loc.column() as u64,
+                    )
+                }
+            }
         }
     };
 }
 
 /// The bump allocator used as the default rust heap when running programs.
 pub struct BumpAllocator {
-    #[deprecated(
-        since = "2.2.2",
-        note = "This field should not be accessed directly. It will become private in future versions"
-    )]
-    pub start: usize,
-    #[deprecated(
-        since = "2.2.2",
-        note = "This field should not be accessed directly. It will become private in future versions"
-    )]
-    pub len: usize,
+    start: usize,
+    len: usize,
 }
 
 impl BumpAllocator {
@@ -327,11 +330,23 @@ impl BumpAllocator {
         // initialize the data there
         *pos_ptr = pos_ptr as usize + arena.len();
 
-        #[allow(deprecated)] //we get to use deprecated pub fields
         Self {
             start: pos_ptr as usize,
             len: arena.len(),
         }
+    }
+
+    /// Creates the allocator tied to specific range of addresses.
+    ///
+    /// # Safety
+    /// This is unsafe in most situations, unless you are totally sure that the
+    /// provided start address and length can be written to by the allocator,
+    /// and that the memory will be usable for the lifespan of the allocator.
+    ///
+    /// For Solana on-chain programs, a certain address range is reserved, so
+    /// the allocator can be given those addresses.
+    pub const unsafe fn with_fixed_address_range(start: usize, len: usize) -> Self {
+        Self { start, len }
     }
 }
 
@@ -341,7 +356,6 @@ impl BumpAllocator {
 #[allow(clippy::arithmetic_side_effects)]
 unsafe impl std::alloc::GlobalAlloc for BumpAllocator {
     #[inline]
-    #[allow(deprecated)] //we get to use deprecated pub fields
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let pos_ptr = self.start as *mut usize;
         let mut pos = *pos_ptr;
@@ -410,7 +424,7 @@ unsafe fn deserialize_account_info<'a>(
     offset += size_of::<Pubkey>();
 
     #[allow(clippy::cast_ptr_alignment)]
-    let lamports = Rc::new(RefCell::new(&mut *(input.add(offset) as *mut u64)));
+    let lamports = &mut *(input.add(offset) as *mut u64);
     offset += size_of::<u64>();
 
     #[allow(clippy::cast_ptr_alignment)]
@@ -421,18 +435,13 @@ unsafe fn deserialize_account_info<'a>(
     // requires that MAX_PERMITTED_DATA_LENGTH fits in a u32
     *(input.add(original_data_len_offset) as *mut u32) = data_len as u32;
 
-    let data = Rc::new(RefCell::new({
-        from_raw_parts_mut(input.add(offset), data_len)
-    }));
-    offset += data_len + MAX_PERMITTED_DATA_INCREASE;
+    let data = from_raw_parts_mut(input.add(offset), data_len);
+    // rent epoch is not deserialized, so skip it
+    offset += data_len + MAX_PERMITTED_DATA_INCREASE + size_of::<u64>();
     offset += (offset as *const u8).align_offset(BPF_ALIGN_OF_U128); // padding
 
-    #[allow(clippy::cast_ptr_alignment)]
-    let rent_epoch = *(input.add(offset) as *const u64);
-    offset += size_of::<u64>();
-
     (
-        AccountInfo {
+        AccountInfo::new(
             key,
             is_signer,
             is_writable,
@@ -440,8 +449,7 @@ unsafe fn deserialize_account_info<'a>(
             data,
             owner,
             executable,
-            rent_epoch,
-        },
+        ),
         offset,
     )
 }

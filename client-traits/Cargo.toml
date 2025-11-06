@@ -2,7 +2,7 @@
 name = "solana-client-traits"
 description = "Traits for Solana clients"
 documentation = "https://docs.rs/solana-client-traits"
-version = "2.2.1"
+version = "3.0.0"
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
@@ -23,6 +23,6 @@ solana-message = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
-solana-system-interface = { workspace = true }
+solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-transaction = { workspace = true, features = ["bincode"] }
 solana-transaction-error = { workspace = true }

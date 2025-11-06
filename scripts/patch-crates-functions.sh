@@ -13,6 +13,7 @@ crate_dirs=(
   big-mod-exp
   bincode
   blake3-hasher
+  bls-signatures
   bn254
   borsh
   client-traits
@@ -21,7 +22,6 @@ crate_dirs=(
   commitment-config
   compute-budget-interface
   cpi
-  decode-error
   define-syscall
   derivation-path
   ed25519-program
@@ -29,9 +29,9 @@ crate_dirs=(
   epoch-rewards
   epoch-rewards-hasher
   epoch-schedule
+  epoch-stake
   example-mocks
   feature-gate-interface
-  feature-set
   fee-calculator
   fee-structure
   file-download
@@ -61,7 +61,6 @@ crate_dirs=(
   packet
   poh-config
   precompile-error
-  precompiles
   presigner
   program
   program-entrypoint
@@ -73,8 +72,6 @@ crate_dirs=(
   quic-definitions
   rent
   rent-collector
-  rent-debits
-  reserved-account-keys
   reward-info
   sanitize
   sdk
@@ -93,6 +90,7 @@ crate_dirs=(
   shred-version
   signature
   signer
+  signer-store
   slot-hashes
   slot-history
   stable-layout

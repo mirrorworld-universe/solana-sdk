@@ -2,7 +2,7 @@
 name = "solana-big-mod-exp"
 description = "Solana big integer modular exponentiation"
 documentation = "https://docs.rs/solana-big-mod-exp"
-version = "2.2.1"
+version = "3.0.0"
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
@@ -21,9 +21,14 @@ solana-define-syscall = { workspace = true }
 
 [dev-dependencies]
 array-bytes = { workspace = true }
+criterion = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "big_mod_exp_bench"
+harness = false

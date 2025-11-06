@@ -12,8 +12,9 @@ use core::{
 extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
+use core::error::Error;
 #[cfg(feature = "std")]
-use std::{error::Error, vec::Vec};
+use std::vec::Vec;
 #[cfg(feature = "serde")]
 use {
     serde_big_array::BigArray,
@@ -30,6 +31,10 @@ const MAX_BASE58_SIGNATURE_LEN: usize = 88;
 #[repr(transparent)]
 #[cfg_attr(feature = "frozen-abi", derive(solana_frozen_abi_macro::AbiExample))]
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(
+    feature = "bytemuck",
+    derive(bytemuck_derive::Pod, bytemuck_derive::Zeroable)
+)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Signature(
     #[cfg_attr(feature = "serde", serde(with = "BigArray"))] [u8; SIGNATURE_BYTES],
@@ -65,7 +70,7 @@ impl Signature {
         pubkey_bytes: &[u8],
         message_bytes: &[u8],
     ) -> Result<(), ed25519_dalek::SignatureError> {
-        let publickey = ed25519_dalek::PublicKey::from_bytes(pubkey_bytes)?;
+        let publickey = ed25519_dalek::VerifyingKey::try_from(pubkey_bytes)?;
         let signature = self.0.as_slice().try_into()?;
         publickey.verify_strict(message_bytes, &signature)
     }
@@ -139,7 +144,6 @@ pub enum ParseSignatureError {
     Invalid,
 }
 
-#[cfg(feature = "std")]
 impl Error for ParseSignatureError {}
 
 impl fmt::Display for ParseSignatureError {
